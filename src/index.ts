@@ -1,8 +1,12 @@
 import { Hono } from 'hono';
+import { BeemaxCognitiveDO } from './durable-objects/BeemaxCognitiveDO';
+
+export { BeemaxCognitiveDO };
 
 interface Bindings {
   DB: D1Database;
   ENVIRONMENT: string;
+  BEEMAX_COGNITIVE_DO: DurableObjectNamespace;
 }
 
 interface SportsSessionInput {
@@ -20,6 +24,11 @@ interface TelemetryInput {
   acceleration_mps2: number;
 }
 
+interface BeemaxChatInput {
+  prompt: string;
+  identity: string;
+}
+
 const app = new Hono<{ Bindings: Bindings }>();
 
 function isNonEmptyString(value: unknown): value is string {
@@ -30,8 +39,92 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unexpected error';
 }
 
+app.get('/', (c) => c.html(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BEEMAX Cognitive Terminal</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #09090b; color: #e2e8f0; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 1.25rem; }
+    main { width: min(760px, 100%); background: #121215; border: 1px solid #27272a; border-radius: 10px; padding: 1.25rem; }
+    h1 { color: #38bdf8; font-size: 1rem; }
+    #beemax-log { height: min(55vh, 420px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #000; border: 1px solid #27272a; border-radius: 6px; padding: 1rem; color: #34d399; }
+    form { display: flex; gap: .5rem; margin-top: .75rem; }
+    input, button { font: inherit; border-radius: 4px; padding: .65rem .8rem; }
+    input { flex: 1; min-width: 0; color: inherit; background: #000; border: 1px solid #3f3f46; }
+    button { border: 0; background: #38bdf8; color: #09090b; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .note { color: #94a3b8; font-size: .75rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BEEMAX Interactive Cognitive Terminal</h1>
+    <div id="beemax-log" aria-live="polite">[BEEMAX]: Cognitive terminal online. Type a command below.</div>
+    <form id="beemax-form">
+      <input type="text" id="beemax-input" maxlength="2000" placeholder="Ask BEEMAX anything…" autocomplete="off" required>
+      <button id="beemax-submit" type="submit">Transmit</button>
+    </form>
+    <p class="note">Demo response engine. Identity is a display label and is not authenticated.</p>
+  </main>
+  <script>
+    const form = document.getElementById('beemax-form');
+    const input = document.getElementById('beemax-input');
+    const log = document.getElementById('beemax-log');
+    const submit = document.getElementById('beemax-submit');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const prompt = input.value.trim();
+      if (!prompt) return;
+      log.textContent += '\\n[YOU]: ' + prompt;
+      input.value = '';
+      submit.disabled = true;
+      try {
+        const response = await fetch('/api/beemax/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, identity: 'maxjurreau-3' })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Request failed');
+        log.textContent += '\\n' + data.reply;
+      } catch (error) {
+        log.textContent += '\\n[ERROR]: ' + (error instanceof Error ? error.message : 'Transmission failed.');
+      } finally {
+        submit.disabled = false;
+        log.scrollTop = log.scrollHeight;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>`));
+
 app.get('/health', (c) => {
   return c.json({ status: 'healthy', gateway: 'max-sports', timestamp: Date.now() });
+});
+
+app.post('/api/beemax/chat', async (c) => {
+  let body: BeemaxChatInput;
+  try {
+    body = await c.req.json<BeemaxChatInput>();
+  } catch {
+    return c.json({ success: false, error: 'Request body must be valid JSON' }, 400);
+  }
+
+  if (!body || !isNonEmptyString(body.prompt) || !isNonEmptyString(body.identity)) {
+    return c.json({ success: false, error: 'Prompt and identity are required' }, 400);
+  }
+
+  const doId = c.env.BEEMAX_COGNITIVE_DO.idFromName('main-beemax-instance');
+  const stub = c.env.BEEMAX_COGNITIVE_DO.get(doId);
+  return stub.fetch(new Request('https://beemax.internal/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
 });
 
 app.post('/api/v1/sports/sessions', async (c) => {
@@ -51,7 +144,7 @@ app.post('/api/v1/sports/sessions', async (c) => {
     const createdAt = Date.now();
     await c.env.DB.prepare(
       `INSERT INTO sports_sessions (session_id, sport_type, home_team, away_team, match_status, created_at)
-       VALUES (?, ?, ?, ?, 'scheduled', ?)`
+       VALUES (?, ?, ?, ?, 'scheduled', ?)`,
     )
       .bind(session_id.trim(), sport_type.trim(), home_team.trim(), away_team.trim(), createdAt)
       .run();
@@ -84,7 +177,7 @@ app.post('/api/v1/sports/telemetry', async (c) => {
     const timestamp = Date.now();
     await c.env.DB.prepare(
       `INSERT INTO kinematic_metrics (metric_id, session_id, player_id, speed_mps, acceleration_mps2, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
       .bind(metric_id.trim(), session_id.trim(), player_id.trim(), speed_mps, acceleration_mps2, timestamp)
       .run();
@@ -106,7 +199,7 @@ app.get('/api/v1/sports/predictions/:sessionId', async (c) => {
        FROM predictive_models
        WHERE session_id = ?
        ORDER BY updated_at DESC
-       LIMIT 5`
+       LIMIT 5`,
     )
       .bind(sessionId)
       .all();
