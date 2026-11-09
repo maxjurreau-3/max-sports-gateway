@@ -1,0 +1,13 @@
+name = "max-sports"
+main = "src/index.ts"
+compatibility_date = "2026-03-01"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Isolated Sovereign D1 Database Binding for Sports Telemetry
+[[d1_databases]]
+binding = "DB"
+database_name = "max-sports-sovereign-db"
+database_id = "bd40ee78-1b22-4dee-ab6e-5096f46f908c"
+migrations_dir = "migrations"
