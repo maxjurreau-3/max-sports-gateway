@@ -11,3 +11,11 @@ binding = "DB"
 database_name = "max-sports-sovereign-db"
 database_id = "bd40ee78-1b22-4dee-ab6e-5096f46f908c"
 migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "BEEMAX_COGNITIVE_DO"
+class_name = "BeemaxCognitiveDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["BeemaxCognitiveDO"]
