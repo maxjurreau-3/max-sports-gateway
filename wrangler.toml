@@ -1,21 +1,32 @@
 name = "max-sports-gateway"
-main = "src/index.ts"
+main = "src/worker.ts"
 compatibility_date = "2026-03-01"
 
-[vars]
-ENVIRONMENT = "production"
+# Durable Object bindings
+[[durable_objects.bindings]]
+name = "SPORTS_TELEMETRY_DO"
+class_name = "SportsTelemetryDO"
 
-# Isolated Sovereign D1 Database Binding for Sports Telemetry
-[[d1_databases]]
-binding = "DB"
-database_name = "max-sports-sovereign-db"
-database_id = "bd40ee78-1b22-4dee-ab6e-5096f46f908c"
-migrations_dir = "migrations"
+[[durable_objects.bindings]]
+name = "WAGER_ESCROW_DO"
+class_name = "WagerEscrowDO"
 
 [[durable_objects.bindings]]
 name = "BEEMAX_COGNITIVE_DO"
 class_name = "BeemaxCognitiveDO"
 
+# Keep the already-defined v1 migration stable; add the additional classes in v2.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["BeemaxCognitiveDO"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["SportsTelemetryDO", "WagerEscrowDO"]
+
+# D1 database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "max-sports-sovereign-db"
+database_id = "bd40ee78-1b22-4dee-ab6e-5096f46f908c"
+migrations_dir = "migrations"
