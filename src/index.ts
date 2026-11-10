@@ -36,7 +36,7 @@ interface SessionPayload {
 }
 
 const SESSION_COOKIE = 'max_session';
-const SESSION_TTL_SECONDS = 60 * 60 * 8;
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const ARCHITECT_IDENTITY = 'maxjurreau-3';
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -291,13 +291,13 @@ app.post('/api/auth/login', async (c) => {
   const payload: SessionPayload = { identity, tier, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 };
   const token = await createSessionToken(payload, signingSecret);
   return c.json({ success: true, tier }, 200, {
-    'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_SECONDS}`,
+    'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_SECONDS}`,
     'Cache-Control': 'no-store',
   });
 });
 
 app.post('/api/auth/logout', (c) => c.json({ success: true }, 200, {
-  'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`,
+  'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
   'Cache-Control': 'no-store',
 }));
 
