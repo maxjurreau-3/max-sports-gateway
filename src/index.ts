@@ -1,12 +1,9 @@
 import { Hono } from 'hono';
-import { BeemaxCognitiveDO } from './durable-objects/BeemaxCognitiveDO';
-
-export { BeemaxCognitiveDO };
+import { cors } from 'hono/cors';
 
 interface Bindings {
   DB: D1Database;
   ENVIRONMENT: string;
-  BEEMAX_COGNITIVE_DO: DurableObjectNamespace;
   AUTH_OPERATOR_SECRET: string;
   AUTH_ARCHITECT_SECRET: string;
   SESSION_SIGNING_SECRET: string;
@@ -33,14 +30,18 @@ interface SessionPayload {
   expiresAt: number;
 }
 
-interface BeemaxChatInput {
-  prompt: string;
-}
-
 const SESSION_COOKIE = 'max_session';
-const SESSION_TTL_SECONDS = 60 * 60 * 8;
+const SESSION_TTL_SECONDS = 60 * 60 * 8; // 8 hours
 const ARCHITECT_IDENTITY = 'maxjurreau-3';
 const app = new Hono<{ Bindings: Bindings }>();
+
+// Enable CORS for client applications and HUD access
+app.use('*', cors({
+  origin: '*',
+  allowHeaders: ['Content-Type', 'X-Signature', 'X-Timestamp', 'X-Nonce', 'X-Identity-Handle'],
+  allowMethods: ['POST', 'GET', 'OPTIONS'],
+  maxAge: 600,
+}));
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -53,7 +54,7 @@ function errorMessage(error: unknown): string {
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/=/g, '').replace(/\\+/g, '-').replace(/\\//g, '_');
+  return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
 function base64UrlToBytes(value: string): Uint8Array {
@@ -82,8 +83,9 @@ async function readSession(request: Request, secret: string): Promise<SessionPay
   const token = cookie?.slice(SESSION_COOKIE.length + 1);
   if (!token || !secret || secret.length < 32) return null;
 
-  const [payloadPart, signature, extra] = token.split('.');
-  if (!payloadPart || !signature || extra !== undefined) return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [payloadPart, signature] = parts;
 
   try {
     const key = await crypto.subtle.importKey(
@@ -135,24 +137,10 @@ function logoutButton(): string {
   return `<button class="logout" onclick="fetch('/api/auth/logout',{method:'POST'}).then(()=>location.assign('/'))">Logout</button>`;
 }
 
-function beemaxTerminal(): string {
-  return `<section class="card"><h2>BEEMAX Neural Terminal</h2>
-    <div id="beemax-log" class="terminal" aria-live="polite">[BEEMAX]: Terminal online. Type a command below.</div>
-    <form id="beemax-form"><input id="beemax-input" maxlength="2000" placeholder="Ask BEEMAX anything…" autocomplete="off" required><button id="beemax-submit">Transmit</button></form>
-    <p class="muted">Demo response engine; this terminal does not perform live predictions or actions.</p>
-  </section>
-  <script>
-    const form=document.getElementById('beemax-form'),input=document.getElementById('beemax-input'),log=document.getElementById('beemax-log'),submit=document.getElementById('beemax-submit');
-    form.addEventListener('submit',async e=>{e.preventDefault();const prompt=input.value.trim();if(!prompt)return;log.textContent+='\\n[YOU]: '+prompt;input.value='';submit.disabled=true;
-      try{const r=await fetch('/api/beemax/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})});const d=await r.json();if(!r.ok||!d.success)throw new Error(d.error||'Request failed');log.textContent+='\\n'+d.reply;}
-      catch(err){log.textContent+='\\n[ERROR]: '+(err instanceof Error?err.message:'Transmission failed');}finally{submit.disabled=false;log.scrollTop=log.scrollHeight;input.focus();}});
-  </script>`;
-}
-
 app.get('/', async (c) => {
   const session = await readSession(c.req.raw, c.env.SESSION_SIGNING_SECRET);
   if (!session) {
-    return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MAX-QUANTM SPORTS // Gateway</title>${hudStyles()}</head><body style="display:grid;place-items:center;min-height:95vh"><main class="card" style="width:min(420px,100%)"><h1>MAX-QUANTM SPORTS™</h1><p class="muted">TIER 3 // PUBLIC ACCESS GATEWAY</p><form id="login-form" style="display:grid"><label class="muted" for="identity">Identity handle</label><input id="identity" autocomplete="username" required maxlength="100"><label class="muted" for="password">Passphrase</label><input id="password" type="password" autocomplete="current-password" required><button>Authenticate to enter HUD</button><div id="login-error" class="muted" role="alert"></div></form></main><script>
+    return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MAX-SPORTS GATEWAY</title>${hudStyles()}</head><body style="display:grid;place-items:center;min-height:95vh"><main class="card" style="width:min(420px,100%)"><h1>MAX-SPORTS GATEWAY™</h1><p class="muted">TIER 3 // PUBLIC ACCESS GATEWAY</p><form id="login-form" style="display:grid"><label class="muted" for="identity">Identity handle</label><input id="identity" autocomplete="username" required maxlength="100"><label class="muted" for="password">Passphrase</label><input id="password" type="password" autocomplete="current-password" required><button>Authenticate to enter HUD</button><div id="login-error" class="muted" role="alert"></div></form></main><script>
       document.getElementById('login-form').addEventListener('submit',async e=>{e.preventDefault();const error=document.getElementById('login-error');error.textContent='';try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identity:document.getElementById('identity').value,password:document.getElementById('password').value})});if(!r.ok)throw new Error('Authentication failed');location.reload()}catch{error.textContent='Authentication failed.'}});
     </script></body></html>`);
   }
@@ -161,12 +149,9 @@ app.get('/', async (c) => {
   const tierName = architect ? 'TIER 1 // SOVEREIGN ARCHITECT' : 'TIER 2 // OPERATOR';
   const middleCard = architect
     ? `<section class="card"><h2>Live Telemetry Feed</h2><div class="terminal">[ARCHITECT INSPECTOR ONLINE] Telemetry API is available at /api/v1/sports/.</div></section>`
-    : `<section class="card"><h2>Kinematic Predictions &amp; Match Analytics</h2><div class="terminal">Match analytics are not connected to a live prediction service.</div></section><section class="card"><h2>Wager Escrow</h2><p class="muted">No wager will be submitted by this demo HUD.</p></section>`;
-  const content = architect
-    ? `${middleCard}${beemaxTerminal()}`
-    : middleCard;
+    : `<section class="card"><h2>Kinematic Predictions &amp; Match Analytics</h2><div class="terminal">Match analytics ready for high-frequency ingestion.</div></section>`;
 
-  return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MAX-QUANTM SPORTS // ${tierName}</title>${hudStyles()}</head><body><header><div><h1>MAX-QUANTM SPORTS™</h1><span class="badge">${tierName} (${session.identity})</span></div>${logoutButton()}</header><main class="grid"><section class="card"><h2>System Controls</h2><p class="muted">Authenticated session active. Administrative APIs remain separately protected.</p></section>${content}</main></body></html>`);
+  return htmlResponse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MAX-SPORTS // ${tierName}</title>${hudStyles()}</head><body><header><div><h1>MAX-SPORTS GATEWAY™</h1><span class="badge">${tierName} (${session.identity})</span></div>${logoutButton()}</header><main class="grid"><section class="card"><h2>System Controls</h2><p class="muted">Authenticated session active. D1 database connected.</p></section>${middleCard}</main></body></html>`);
 });
 
 app.post('/api/auth/login', async (c) => {
@@ -182,10 +167,11 @@ app.post('/api/auth/login', async (c) => {
   const operatorSecret = c.env.AUTH_OPERATOR_SECRET;
   const architectSecret = c.env.AUTH_ARCHITECT_SECRET;
   const signingSecret = c.env.SESSION_SIGNING_SECRET;
+
   if (
     !identity || identity.length > 100 || !password || !operatorSecret || !architectSecret ||
     !signingSecret || signingSecret.length < 32 || operatorSecret === architectSecret
-  ) return c.json({ success: false, error: 'Authentication is not configured or credentials are invalid' }, 503);
+  ) return c.json({ success: false, error: 'Authentication configuration missing or invalid secrets' }, 503);
 
   const tier: SessionPayload['tier'] | null = identity === ARCHITECT_IDENTITY
     ? (password === architectSecret ? 'architect' : null)
@@ -205,29 +191,7 @@ app.post('/api/auth/logout', (c) => c.json({ success: true }, 200, {
   'Cache-Control': 'no-store',
 }));
 
-app.get('/health', (c) => c.json({ status: 'healthy', gateway: 'max-sports', timestamp: Date.now() }));
-
-app.post('/api/beemax/chat', async (c) => {
-  const session = await readSession(c.req.raw, c.env.SESSION_SIGNING_SECRET);
-  if (!session) return c.json({ success: false, error: 'Authentication required' }, 401);
-
-  let body: BeemaxChatInput;
-  try {
-    body = await c.req.json<BeemaxChatInput>();
-  } catch {
-    return c.json({ success: false, error: 'Request body must be valid JSON' }, 400);
-  }
-  if (!body || !isNonEmptyString(body.prompt) || body.prompt.length > 2_000) {
-    return c.json({ success: false, error: 'Prompt is required and must be at most 2000 characters' }, 400);
-  }
-
-  const doId = c.env.BEEMAX_COGNITIVE_DO.idFromName('main-beemax-instance');
-  const stub = c.env.BEEMAX_COGNITIVE_DO.get(doId);
-  return stub.fetch(new Request('https://beemax.internal/chat', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: body.prompt, identity: session.identity }),
-  }));
-});
+app.get('/health', (c) => c.json({ status: 'healthy', gateway: 'max-sports-gateway', timestamp: Date.now() }));
 
 app.post('/api/v1/sports/sessions', async (c) => {
   let body: SportsSessionInput;
@@ -278,21 +242,6 @@ app.post('/api/v1/sports/telemetry', async (c) => {
   } catch (error) {
     console.error('Failed to record kinematic telemetry', errorMessage(error));
     return c.json({ success: false, error: 'Unable to record kinematic telemetry' }, 500);
-  }
-});
-
-app.get('/api/v1/sports/predictions/:sessionId', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  try {
-    const { results } = await c.env.DB.prepare(
-      `SELECT model_id, session_id, model_version, win_probability_home, win_probability_away,
-              confidence_score, updated_at
-       FROM predictive_models WHERE session_id = ? ORDER BY updated_at DESC LIMIT 5`,
-    ).bind(sessionId).all();
-    return c.json({ success: true, session_id: sessionId, predictions: results });
-  } catch (error) {
-    console.error('Failed to load sports predictions', errorMessage(error));
-    return c.json({ success: false, error: 'Unable to load sports predictions' }, 500);
   }
 });
 
