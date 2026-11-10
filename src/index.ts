@@ -290,16 +290,26 @@ app.post('/api/auth/login', async (c) => {
 
   const payload: SessionPayload = { identity, tier, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 };
   const token = await createSessionToken(payload, signingSecret);
+
+  // Dynamically apply Secure flag only if request is over HTTPS
+  const isSecure = c.req.url.startsWith('https://');
+  const secureFlag = isSecure ? '; Secure' : '';
+
   return c.json({ success: true, tier }, 200, {
-    'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_SECONDS}`,
+    'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_SECONDS}`,
     'Cache-Control': 'no-store',
   });
 });
 
-app.post('/api/auth/logout', (c) => c.json({ success: true }, 200, {
-  'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
-  'Cache-Control': 'no-store',
-}));
+app.post('/api/auth/logout', (c) => {
+  const isSecure = c.req.url.startsWith('https://');
+  const secureFlag = isSecure ? '; Secure' : '';
+
+  return c.json({ success: true }, 200, {
+    'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly${secureFlag}; SameSite=Lax; Path=/; Max-Age=0`,
+    'Cache-Control': 'no-store',
+  });
+});
 
 // User Money Account Endpoints
 app.get('/api/v1/wallet/balance', async (c) => {
